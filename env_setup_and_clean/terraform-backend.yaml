@@ -1,0 +1,38 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CloudFormation stack to create necessary resources for Terraform remote backend.
+  This includes an S3 bucket for storing state files and a DynamoDB table for state locking.
+
+Resources:
+  TerraformStateBucket:
+    Type: AWS::S3::Bucket
+    Properties: 
+      BucketName: my-terraform-state-bucket
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: terraform-state-lock
+      AttributeDefinitions:
+        - AttributeName: LockID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: LockID
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+Outputs:
+  BucketName:
+    Description: "Name of the S3 bucket for Terraform state files"
+    Value: !Ref TerraformStateBucket
+
+  DynamoDBTableName:
+    Description: "Name of the DynamoDB table for state locking"
+    Value: !Ref DynamoDBTable

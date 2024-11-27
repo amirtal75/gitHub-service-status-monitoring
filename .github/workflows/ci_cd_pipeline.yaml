@@ -1,0 +1,250 @@
+name: Deploy Service to EKS
+
+on:
+#  push:
+#    branches:
+#      - main
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Run Terraform apply"
+        required: true
+        default: 'false'
+      deploy:
+        description: "Run deployment to EKS"
+        required: false
+        default: 'false'
+      rollback:
+        description: "Run Helm rollback"
+        required: false
+        default: 'false'
+
+env:
+  AWS_REGION: us-west-2
+  EKS_CLUSTER_NAME: monitoring
+  NAMESPACE: monitoring
+  IMAGE_TAG: ${{ github.sha }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+
+  build-image-monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set Docker image tag
+        run: |
+          IMAGE_NAME=monitor-service
+          SERVICE_NAME=monitor
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          echo "SERVICE_NAME=$SERVICE_NAME" >> $GITHUB_ENV
+          echo "Got the image name: $IMAGE_NAME"
+
+          # Debug output to verify Docker credentials
+          echo "Using Docker username: ${{ secrets.DOCKER_USERNAME }}"
+          echo "Checking if PAT is set properly"
+
+          # Get the latest tag and increment it
+          echo "Fetching latest tag from Docker Hub..."
+          RESPONSE=$(curl -s -u "${{ secrets.DOCKER_USERNAME }}:${{ secrets.PAT }}" "https://hub.docker.com/v2/repositories/${{ secrets.DOCKER_USERNAME }}/$IMAGE_NAME/tags/?page_size=1&ordering=last_updated")
+          echo "Response from Docker Hub: $RESPONSE"
+
+          # Extracting the latest tag
+          LATEST_TAG=$(echo "$RESPONSE" | jq -r '.results[0].name')
+          echo "Latest tag: $LATEST_TAG"
+
+          # Check if LATEST_TAG matches the version pattern
+          if [[ "$LATEST_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            MAJOR=${BASH_REMATCH[1]}
+            MINOR=${BASH_REMATCH[2]}
+            PATCH=${BASH_REMATCH[3]}
+            NEW_TAG="v$MAJOR.$MINOR.$((PATCH + 1))"
+          else
+            echo "Could not find a valid tag, setting to default tag v1.0.0"
+            NEW_TAG="v1.0.0" # Default tag if no valid tag exists
+          fi
+
+          echo "New tag: $NEW_TAG"
+          echo "IMAGE_TAG=$NEW_TAG" >> $GITHUB_ENV
+
+
+      - name: Log in to Docker Hub
+        run: |
+          docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.PAT }}
+
+      - name: Build and push Docker image
+        run: |
+          cd microservices/$SERVICE_NAME
+          echo "build -t ${{ secrets.DOCKER_USERNAME }}/$IMAGE_NAME:$IMAGE_TAG ./"
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/$IMAGE_NAME:$IMAGE_TAG ./
+          docker push ${{ secrets.DOCKER_USERNAME }}/$IMAGE_NAME:$IMAGE_TAG
+
+
+  build-image-notifier:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set Docker image tag
+        run: |
+          IMAGE_NAME=notifier-service
+          SERVICE_NAME=notifier
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          echo "SERVICE_NAME=$SERVICE_NAME" >> $GITHUB_ENV
+          echo "Got the image name: $IMAGE_NAME"
+
+          # Debug output to verify Docker credentials
+          echo "Using Docker username: ${{ secrets.DOCKER_USERNAME }}"
+          echo "Checking if PAT is set properly"
+
+          # Get the latest tag and increment it
+          echo "Fetching latest tag from Docker Hub..."
+          RESPONSE=$(curl -s -u "${{ secrets.DOCKER_USERNAME }}:${{ secrets.PAT }}" "https://hub.docker.com/v2/repositories/${{ secrets.DOCKER_USERNAME }}/$IMAGE_NAME/tags/?page_size=1&ordering=last_updated")
+          echo "Response from Docker Hub: $RESPONSE"
+
+          # Extracting the latest tag
+          LATEST_TAG=$(echo "$RESPONSE" | jq -r '.results[0].name')
+          echo "Latest tag: $LATEST_TAG"
+
+          # Check if LATEST_TAG matches the version pattern
+          if [[ "$LATEST_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            MAJOR=${BASH_REMATCH[1]}
+            MINOR=${BASH_REMATCH[2]}
+            PATCH=${BASH_REMATCH[3]}
+            NEW_TAG="v$MAJOR.$MINOR.$((PATCH + 1))"
+          else
+            echo "Could not find a valid tag, setting to default tag v1.0.0"
+            NEW_TAG="v1.0.0" # Default tag if no valid tag exists
+          fi
+
+          echo "New tag: $NEW_TAG"
+          echo "IMAGE_TAG=$NEW_TAG" >> $GITHUB_ENV
+
+
+      - name: Log in to Docker Hub
+        run: |
+          docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.PAT }}
+
+      - name: Build and push Docker image
+        run: |
+          cd microservices/$SERVICE_NAME
+          echo "build -t ${{ secrets.DOCKER_USERNAME }}/$IMAGE_NAME:$IMAGE_TAG ./"
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/$IMAGE_NAME:$IMAGE_TAG ./
+          docker push ${{ secrets.DOCKER_USERNAME }}/$IMAGE_NAME:$IMAGE_TAG
+
+
+  terraform-plan:
+    runs-on: ubuntu-latest
+    container:
+      image: hashicorp/terraform:latest
+    needs: [build-image-monitor, build-image-notifier]
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::654654392619:role/github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+
+      - name: Terraform Plan
+        run: |
+          cd terraform
+          terraform plan -out=tfplan
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/tfplan
+
+  terraform-apply:
+    runs-on: ubuntu-latest
+    container:
+      image: hashicorp/terraform:latest
+    needs: terraform-plan
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::654654392619:role/github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: terraform/
+
+      - name: Terraform Apply
+        run: |
+          cd terraform
+          terraform apply tfplan
+
+  deploy-to-eks:
+    runs-on: ubuntu-latest
+    needs: [build-image-monitor, build-image-notifier, terraform-plan, terraform-apply]
+    steps:
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_NAME
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Deploy microservices with Helm
+        run: |
+          cd helm
+          helm upgrade --install monitor ./monitor -f ./monitor/values.yaml --namespace $NAMESPACE --create-namespace
+          helm upgrade --install notifier ./notifier -f ./monitor/values.yaml --namespace $NAMESPACE --create-namespace
+
+      - name: Monitor Pod Readiness
+        run: |
+          kubectl rollout status deployment/monitor --namespace $NAMESPACE --timeout=5m
+          kubectl rollout status deployment/notifier --namespace $NAMESPACE --timeout=5m
+          echo "Deployment completed successfully"
+
+  rollback:
+    runs-on: ubuntu-latest
+    needs: deploy-to-eks
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.apply == 'true'
+    steps:
+      - name: Set AWS Credentials
+        run: echo "AWS credentials are set for the deployment job."
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_NAME
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Rollback Helm Deployment
+        run: |
+          cd helm
+          helm rollback monitor --namespace $NAMESPACE
+          helm rollback notifier --namespace $NAMESPACE
+          echo "Rollback completed successfully"

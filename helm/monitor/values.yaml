@@ -1,0 +1,59 @@
+# Deployment Configuration
+replicaCount: 1
+terminationGracePeriodSeconds: 10
+
+serviceAccount:
+  enabled: true
+  roleArn: arn:aws:iam::654654392619:role/github-actions-role
+
+image:
+  repository: amirtal75/monitor-service
+  tag: v1.0.11
+  pullPolicy: IfNotPresent
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+service:
+  type: ClusterIP
+  port: 5000
+  targetPort: 5000
+  metricsPort: 8000       # Prometheus scrape port
+  metricsTargetPort: 8000
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/port: '8000'
+    prometheus.io/path: '/metrics'
+
+config:
+  checkInterval: "300" # Interval in seconds for monitoring GitHub status
+  testFlow: "false" # Enable test flow for testing environments
+  logLevel: "DEBUG"
+
+env:
+  AWS_REGION: "us-west-2"
+  TABLE_NAME_CYBERARK_INCIDENTS: "CyberArkIncidents"
+  TABLE_NAME_GITHUB_INCIDENTS: "GithubIncidents"
+
+ingress:
+  enabled: false
+  className: "nginx"
+  host: monitor.example.com
+  tls:
+    enabled: false
+    secretName: monitor-tls
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 1
+  targetCPUUtilizationPercentage: 80

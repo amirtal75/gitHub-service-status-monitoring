@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/version: "{{ .Chart.AppVersion }}"
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Release.Name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Release.Name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-sa
+      terminationGracePeriodSeconds : {{ .Values.terminationGracePeriodSeconds | default 10 }}
+      containers:
+      - name: monitor
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+        ports:
+        - containerPort: {{ .Values.service.targetPort | default 5000 }}
+        - containerPort: {{ .Values.service.metricsTargetPort | default 8000 }}
+        env:
+        - name: CHECK_INTERVAL
+          value: {{ .Values.config.checkInterval | quote | default "300" }}
+        - name: TEST_FLOW
+          value: {{ .Values.config.testFlow | quote | default "false" }}
+        - name: LOG_LEVEL
+          value: {{ .Values.config.logLevel | quote | default "INFO" }}
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: {{ .Values.service.targetPort | default 5000 }}
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /readiness
+            port: {{ .Values.service.targetPort | default 5000 }}
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        resources:
+          requests:
+            memory: {{ .Values.resources.requests.memory | default "128Mi" }}
+            cpu: {{ .Values.resources.requests.cpu | default "100m" }}
+          limits:
+            memory: {{ .Values.resources.limits.memory | default "256Mi" }}
+            cpu: {{ .Values.resources.limits.cpu | default "500m" }}
+      nodeSelector:
+        {{- if .Values.nodeSelector }}
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+        {{- end }}
+      tolerations:
+        {{- if .Values.tolerations }}
+        {{- toYaml .Values.tolerations | nindent 8 }}
+        {{- end }}
+      affinity:
+        {{- if .Values.affinity }}
+        {{- toYaml .Values.affinity | nindent 8 }}
+        {{- end }}
