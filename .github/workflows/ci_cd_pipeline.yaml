@@ -220,7 +220,7 @@ jobs:
         run: |
           cd helm
           helm upgrade --install monitor ./monitor -f ./monitor/values.yaml --namespace $NAMESPACE --create-namespace
-          helm upgrade --install notifier ./notifier -f ./monitor/values.yaml --namespace $NAMESPACE --create-namespace
+          helm upgrade --install notifier ./notifier -f ./notifier/values.yaml --namespace $NAMESPACE --create-namespace
 
       - name: Monitor Pod Readiness
         run: |
