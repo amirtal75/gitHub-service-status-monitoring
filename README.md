@@ -1,3 +1,6 @@
+Solution:
+Monitoring service to track Github status API for incidents
+
 # Code explanation:
     service can run in test mode by setting env var TEST_FLOW = true in the services config map
 
